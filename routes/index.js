@@ -137,7 +137,12 @@ router.get("/user", function (req, res) {
     // console.log(user)
     res.send({
       code: 0,
-      data: { username: user.username, type: user.type, avatar: user.avatar },
+      data: {
+        username: user.username,
+        type: user.type,
+        avatar: user.avatar,
+        _id: userid,
+      },
     });
   });
 });
@@ -157,14 +162,80 @@ router.get("/msglist", function (req, res) {
   UserModel.find(function (err, userDocs) {
     const users = {};
     userDocs.forEach((doc) => {
-      users[doc._id] = { username: doc.username, header: doc.header };
+      users[doc._id] = {
+        username: doc.username,
+        header: doc.header,
+        id: doc._id,
+      };
     });
 
     ChatModel.find(
       { $or: [{ from: userid }, { to: userid }] },
       filter,
       function (err, chatMsgs) {
-        res.send({ code: 0, data: { users, chatMsgs } });
+        // 过滤聊天列表
+        const msgList = chatMsgs.reduce((countArr, item) => {
+          if (!countArr.find((i) => item.chat_id === i.chat_id)) {
+            return [
+              {
+                ...item._doc,
+                opposite: users[item.from === userid ? item.to : item.from],
+              },
+              ...countArr,
+            ];
+          } else {
+            // 如果此聊天记录已经存在于列表中了, 即判断哪条是最新的, 进行更新
+            return countArr.map((chatItem) => {
+              if (
+                chatItem.chat_id === item.chat_id &&
+                chatItem.create_time < item.create_time
+              ) {
+                return {
+                  ...item._doc,
+                  opposite: users[item.from === userid ? item.to : item.from],
+                };
+              } else {
+                return chatItem;
+              }
+            });
+          }
+        }, []);
+
+        res.send({
+          code: 0,
+          data: { chatMsgs: msgList, total: msgList.length },
+        });
+      }
+    );
+  });
+});
+
+// 获取针对用户的消息列表
+router.post("/msgAimlist", function (req, res) {
+  const userid = req.user._doc._id;
+  const to = req.body.to;
+  UserModel.find(function (err, userDocs) {
+    const users = {};
+    userDocs.forEach((doc) => {
+      users[doc._id] = {
+        username: doc.username,
+        header: doc.header,
+        id: doc._id,
+      };
+    });
+    ChatModel.find(
+      {
+        $or: [
+          { from: userid, to },
+          { to: userid, from: to },
+        ],
+      },
+      filter,
+      function (err, chatMsgs) {
+        res.send({
+          code: 0,
+          data: { chatMsgs, total: chatMsgs.length, opposite: users[to] },
+        });
       }
     );
   });
